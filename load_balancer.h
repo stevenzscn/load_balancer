@@ -4,11 +4,16 @@
 #include <string>
 #include <inttypes.h>
 #include <vector>
+#include <memory>
 
-namespace load_balancer {
+namespace lb {
 
 class backend {
 public:
+    backend() {}
+    backend(const uint32_t id, const std::string &name, const std::string &host, const uint32_t weight, const bool alive)
+        : id_(id), name_(name), host_(host), weight_(weight), alive_(alive) {}
+
     uint32_t id() const { return id_; }
     void set_id(const uint32_t id) { id_ = id; }
 
@@ -32,17 +37,22 @@ private:
     bool alive_ = true;
 };
 
-class load_balancer {
+class lb_base {
 public:
-    load_balancer() {}
-    virtual ~load_balancer() {}
+    lb_base() {}
+    lb_base(const std::vector<std::shared_ptr<backend>> backends) : backends_(backends) {}
+    virtual ~lb_base() {}
 
-    const backend* select() {
-        if (backends_.empty() || do_select() >= backends_.size()) {
+    const std::shared_ptr<backend> select() {
+        uint32_t idx = do_select();
+        if (backends_.empty() || idx >= backends_.size()) {
             return nullptr;
         }
 
-        return backends_.at(do_select());
+        if (!backends_.at(idx)->alive())
+            return select();
+        else
+            return backends_.at(idx);
     }
 
 protected:
@@ -51,10 +61,16 @@ protected:
     }
     
     uint32_t cur_idx = 0;
-    std::vector<backend*> backends_;
+    std::vector<std::shared_ptr<backend>> backends_;
 };
 
-class lb_rr final : public load_balancer {
+class lb_rr final : public lb_base {
+public:
+    lb_rr() {}
+    lb_rr(const std::vector<std::shared_ptr<backend>> backends)
+        : lb_base::lb_base(backends) {}
+    ~lb_rr() {}
+
 protected:
     uint32_t do_select() {
         if (cur_idx >= backends_.size()) {
